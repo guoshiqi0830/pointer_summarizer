@@ -10,6 +10,7 @@ from model import Model
 from torch.nn.utils import clip_grad_norm_
 
 from torch.optim import Adagrad
+from torch.optim import Adam
 
 from data_util import config
 from data_util.batcher import Batcher
