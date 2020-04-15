@@ -141,9 +141,9 @@ class Train(object):
                 start = time.time()
             if iter % 5000 == 0:
                 # self.save_model(running_avg_loss, iter)
-                self.save_model(running_avg_loss, 'latest_' + str((iter//print_interval % 3) + 1) , iter)
-                if self.best_loss < 0 or self.best_loss > running_avg_loss:
-                    self.best_loss = running_avg_loss
+                self.save_model(running_avg_loss, 'latest') , iter)
+                if self.best_loss < 0 or self.best_loss > loss:
+                    self.best_loss = loss
                     self.save_model(running_avg_loss, 'best', iter)
                 print('curr_best_loss:',self.best_loss)
 
