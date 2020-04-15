@@ -36,6 +36,7 @@ class Train(object):
             os.mkdir(self.model_dir)
 
         self.summary_writer = tf.summary.FileWriter(train_dir)
+        self.best_loss = -1
 
     def save_model(self, running_avg_loss, name, iter):
         state = {
@@ -140,7 +141,7 @@ class Train(object):
                 start = time.time()
             if iter % 5000 == 0:
                 # self.save_model(running_avg_loss, iter)
-                self.save_model(running_avg_loss, 'latest' + str((iter//print_interval % 3) + 1) , iter)
+                self.save_model(running_avg_loss, 'latest_' + str((iter//print_interval % 3) + 1) , iter)
                 if self.best_loss < 0 or self.best_loss > running_avg_loss:
                     self.best_loss = running_avg_loss
                     self.save_model(running_avg_loss, 'best', iter)
