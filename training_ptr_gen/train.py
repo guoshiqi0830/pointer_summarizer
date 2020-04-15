@@ -36,7 +36,7 @@ class Train(object):
 
         self.summary_writer = tf.summary.FileWriter(train_dir)
 
-    def save_model(self, running_avg_loss, iter):
+    def save_model(self, running_avg_loss, name, iter):
         state = {
             'iter': iter,
             'encoder_state_dict': self.model.encoder.state_dict(),
@@ -45,7 +45,8 @@ class Train(object):
             'optimizer': self.optimizer.state_dict(),
             'current_loss': running_avg_loss
         }
-        model_save_path = os.path.join(self.model_dir, 'model_%d_%d' % (iter, int(time.time())))
+        # model_save_path = os.path.join(self.model_dir, 'model_%d_%d' % (iter, int(time.time())))
+        model_save_path = os.path.join(self.model_dir, name)
         torch.save(state, model_save_path)
 
     def setup_train(self, model_file_path=None):
@@ -54,7 +55,9 @@ class Train(object):
         params = list(self.model.encoder.parameters()) + list(self.model.decoder.parameters()) + \
                  list(self.model.reduce_state.parameters())
         initial_lr = config.lr_coverage if config.is_coverage else config.lr
-        self.optimizer = Adagrad(params, lr=initial_lr, initial_accumulator_value=config.adagrad_init_acc)
+        # self.optimizer = Adagrad(params, lr=initial_lr, initial_accumulator_value=config.adagrad_init_acc)
+        self.optimizer = Adam(params, lr=initial_lr, betas=config.adam_betas, eps=config.adam_eps, 
+                              weight_decay=config.adam_weight_decay)
 
         start_iter, start_loss = 0, 0
 
@@ -135,7 +138,12 @@ class Train(object):
                                                                            time.time() - start, loss))
                 start = time.time()
             if iter % 5000 == 0:
-                self.save_model(running_avg_loss, iter)
+                # self.save_model(running_avg_loss, iter)
+                self.save_model(running_avg_loss, 'latest' + str((iter//print_interval % 3) + 1) , iter)
+                if self.best_loss < 0 or self.best_loss > running_avg_loss:
+                    self.best_loss = running_avg_loss
+                    self.save_model(running_avg_loss, 'best', iter)
+                print('curr_best_loss:',self.best_loss)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train script")
