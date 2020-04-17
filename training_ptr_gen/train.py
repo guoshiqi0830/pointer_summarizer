@@ -21,13 +21,17 @@ from train_util import get_input_from_batch, get_output_from_batch
 use_cuda = config.use_gpu and torch.cuda.is_available()
 
 class Train(object):
-    def __init__(self):
+    def __init__(self, model_file_path=None):
         self.vocab = Vocab(config.vocab_path, config.vocab_size)
         self.batcher = Batcher(config.train_data_path, self.vocab, mode='train',
                                batch_size=config.batch_size, single_pass=False)
         time.sleep(15)
 
-        train_dir = os.path.join(config.log_root, 'train_%d' % (int(time.time())))
+        if model_file_path:
+          train_dir = os.path.dirname(model_file_path) + '/..'
+        else:
+          train_dir = os.path.join(config.log_root, 'train_%d' % (int(time.time())))
+
         if not os.path.exists(train_dir):
             os.mkdir(train_dir)
 
@@ -38,7 +42,7 @@ class Train(object):
         self.summary_writer = tf.summary.FileWriter(train_dir)
         self.best_loss = -1
 
-    def save_model(self, running_avg_loss, name, iter):
+    def save_model(self, running_avg_loss, iter):
         state = {
             'iter': iter,
             'encoder_state_dict': self.model.encoder.state_dict(),
@@ -47,8 +51,7 @@ class Train(object):
             'optimizer': self.optimizer.state_dict(),
             'current_loss': running_avg_loss
         }
-        # model_save_path = os.path.join(self.model_dir, 'model_%d_%d' % (iter, int(time.time())))
-        model_save_path = os.path.join(self.model_dir, name)
+        model_save_path = os.path.join(self.model_dir, 'model_%d_%d' % (iter, int(time.time())))
         torch.save(state, model_save_path)
 
     def setup_train(self, model_file_path=None):
@@ -140,12 +143,7 @@ class Train(object):
                                                                            time.time() - start, loss))
                 start = time.time()
             if iter % 5000 == 0:
-                # self.save_model(running_avg_loss, iter)
-                self.save_model(running_avg_loss, 'latest' , iter)
-                if self.best_loss < 0 or self.best_loss > loss:
-                    self.best_loss = loss
-                    self.save_model(running_avg_loss, 'best', iter)
-                print('curr_best_loss:',self.best_loss)
+                self.save_model(running_avg_loss, iter)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train script")
@@ -156,5 +154,5 @@ if __name__ == '__main__':
                         help="Model file for retraining (default: None).")
     args = parser.parse_args()
     
-    train_processor = Train()
+    train_processor = Train(args.model_file_path)
     train_processor.trainIters(config.max_iterations, args.model_file_path)
