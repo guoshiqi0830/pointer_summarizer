@@ -28,7 +28,7 @@ class Evaluate(object):
         eval_dir = os.path.join(config.log_root, 'eval_%s' % (model_name))
         if not os.path.exists(eval_dir):
             os.mkdir(eval_dir)
-        self.summary_writer = tf.summary.FileWriter(eval_dir)
+        self.summary_writer = tf.summary.create_file_writer(eval_dir)
 
         self.model = Model(model_file_path, is_eval=True)
 
@@ -63,7 +63,8 @@ class Evaluate(object):
         batch_avg_loss = sum_step_losses / dec_lens_var
         loss = torch.mean(batch_avg_loss)
 
-        return loss.data[0]
+        # return loss.data
+        return loss.item()
 
     def run_eval(self):
         running_avg_loss, iter = 0, 0
