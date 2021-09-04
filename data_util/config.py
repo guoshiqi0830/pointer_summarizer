@@ -38,5 +38,10 @@ use_gpu=True
 lr_coverage=0.15
 
 DEBUG=False
+
+# Loss Mask
 loss_mask=False
 alpha=0.25
+
+# Sparse Loss
+tsallis_alpha=1

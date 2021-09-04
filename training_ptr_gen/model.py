@@ -7,6 +7,8 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from data_util import config
 from numpy import random
 
+from entmax import sparsemax, entmax15
+
 use_cuda = config.use_gpu and torch.cuda.is_available()
 
 random.seed(123)
@@ -182,7 +184,14 @@ class Decoder(nn.Module):
         #output = F.relu(output)
 
         output = self.out2(output) # B x vocab_size
-        vocab_dist = F.softmax(output, dim=1)
+
+        if config.tsallis_alpha == 1:
+            vocab_dist = F.softmax(output, dim=1)
+        elif config.tsallis_alpha == 1.5:
+            vocab_dist = entmax15(output, dim=1)
+        elif config.tsallis_alpha == 2:
+            vocab_dist = sparsemax(output, dim=1)
+                
 
         if config.pointer_gen:
             vocab_dist_ = p_gen * vocab_dist
