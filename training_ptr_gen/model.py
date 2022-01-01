@@ -8,6 +8,9 @@ from data_util import config
 from numpy import random
 
 from entmax import sparsemax, entmax15
+from data_util.utils import debug
+import os
+import numpy as np
 
 use_cuda = config.use_gpu and torch.cuda.is_available()
 
@@ -41,6 +44,15 @@ def init_wt_normal(wt):
 def init_wt_unif(wt):
     wt.data.uniform_(-config.rand_unif_init_mag, config.rand_unif_init_mag)
 
+def top_p(x, top_p):
+    sortedx, indx = torch.sort(x, dim = -1, descending=True)
+    xcum = sortedx.cumsum(dim=-1)
+    keep = (xcum <= top_p).long()
+    mask = keep.gather(1,indx.argsort(1))
+    P = x.mul(mask) + config.eps
+    P_prime = P.div(P.sum(dim=-1).unsqueeze(-1))
+    return P_prime
+
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -51,6 +63,10 @@ class Encoder(nn.Module):
         init_lstm_wt(self.lstm)
 
         self.W_h = nn.Linear(config.hidden_dim * 2, config.hidden_dim * 2, bias=False)
+
+        if config.adaptive_sparsemax and config.fix_the_rest:
+            for p in self.parameters():
+                p.requires_grad = False
 
     #seq_lens should be in descending order
     def forward(self, input, seq_lens):
@@ -76,6 +92,10 @@ class ReduceState(nn.Module):
         self.reduce_c = nn.Linear(config.hidden_dim * 2, config.hidden_dim)
         init_linear_wt(self.reduce_c)
 
+        if config.adaptive_sparsemax and config.fix_the_rest:
+            for p in self.parameters():
+                p.requires_grad = False
+
     def forward(self, hidden):
         h, c = hidden # h, c dim = 2 x b x hidden_dim
         h_in = h.transpose(0, 1).contiguous().view(-1, config.hidden_dim * 2)
@@ -94,6 +114,10 @@ class Attention(nn.Module):
         self.decode_proj = nn.Linear(config.hidden_dim * 2, config.hidden_dim * 2)
         self.v = nn.Linear(config.hidden_dim * 2, 1, bias=False)
 
+        if config.adaptive_sparsemax and config.fix_the_rest:
+            for p in self.parameters():
+                p.requires_grad = False
+
     def forward(self, s_t_hat, encoder_outputs, encoder_feature, enc_padding_mask, coverage):
         b, t_k, n = list(encoder_outputs.size())
 
@@ -107,11 +131,16 @@ class Attention(nn.Module):
             coverage_feature = self.W_c(coverage_input)  # B * t_k x 2*hidden_dim
             att_features = att_features + coverage_feature
 
+        # debug('att_features',att_features.size())
+
         e = F.tanh(att_features) # B * t_k x 2*hidden_dim
         scores = self.v(e)  # B * t_k x 1
         scores = scores.view(-1, t_k)  # B x t_k
 
+        
         attn_dist_ = F.softmax(scores, dim=1)*enc_padding_mask # B x t_k
+
+
         normalization_factor = attn_dist_.sum(1, keepdim=True)
         attn_dist = attn_dist_ / normalization_factor
 
@@ -147,6 +176,15 @@ class Decoder(nn.Module):
         self.out1 = nn.Linear(config.hidden_dim * 3, config.hidden_dim)
         self.out2 = nn.Linear(config.hidden_dim, config.vocab_size)
         init_linear_wt(self.out2)
+        self.batch_cnt=0
+
+        if config.adaptive_sparsemax and config.fix_the_rest:
+            for p in self.parameters():
+                p.requires_grad = False
+
+        if config.adaptive_sparsemax:
+            self.p_sparse_linear = nn.Linear(config.hidden_dim * 4 + config.emb_dim, 1)
+
 
     def forward(self, y_t_1, s_t_1, encoder_outputs, encoder_feature, enc_padding_mask,
                 c_t_1, extra_zeros, enc_batch_extend_vocab, coverage, step):
@@ -178,20 +216,40 @@ class Decoder(nn.Module):
             p_gen = self.p_gen_linear(p_gen_input)
             p_gen = F.sigmoid(p_gen)
 
+
         output = torch.cat((lstm_out.view(-1, config.hidden_dim), c_t), 1) # B x hidden_dim * 3
         output = self.out1(output) # B x hidden_dim
 
-        #output = F.relu(output)
 
         output = self.out2(output) # B x vocab_size
 
+        T = config.temperature
+
         if config.tsallis_alpha == 1:
-            vocab_dist = F.softmax(output, dim=1)
+            vocab_dist = F.softmax(output / T, dim=1)
         elif config.tsallis_alpha == 1.5:
-            vocab_dist = entmax15(output, dim=1)
+            vocab_dist = entmax15(output / T, dim=1)
         elif config.tsallis_alpha == 2:
-            vocab_dist = sparsemax(output, dim=1)
-                
+            vocab_dist = sparsemax(output / T, dim=1)
+        
+
+        # debug('vocab_dist', vocab_dist.size())
+        if config.DEBUG and config.REC_ENTROPY:
+          def get_entropy(t):
+            return - torch.sum(torch.log(t) * t, dim = 1)
+          # vocab_dist_entropy = get_entropy(vocab_dist + config.eps)
+          # debug('vocab_dist_entropy', vocab_dist_entropy)
+          with open( os.path.join(config.log_root,'vocab_dist_entropy/last_run.csv') , 'a') as f:
+            
+            f.write( ','.join([ str(i) for i in vocab_dist.cpu().detach().numpy()]  ) + '\n' )
+            # if step == 0:
+            #   f.write( str(self.batch_cnt) + '\n')
+            #   self.batch_cnt += 1
+            # f.write( ','.join([ str(i) for i in vocab_dist_entropy.cpu().detach().numpy().round(4)]  ) + '\n' )
+            # if config.entmax_select:
+            #   f.write( ','.join([ str(i) for i in p_soft.cpu().detach().numpy().round(4)]  ) + '\n')
+
+            
 
         if config.pointer_gen:
             vocab_dist_ = p_gen * vocab_dist
@@ -201,10 +259,30 @@ class Decoder(nn.Module):
                 vocab_dist_ = torch.cat([vocab_dist_, extra_zeros], 1)
 
             final_dist = vocab_dist_.scatter_add(1, enc_batch_extend_vocab, attn_dist_)
+
+            # debug("extra_zeros", extra_zeros)
+            # debug("vocab_dist_", vocab_dist_)
+            # debug("attn_dist", attn_dist)
+            # debug("enc_batch_extend_vocab", enc_batch_extend_vocab)
+            # debug("final_dist", final_dist.size())
         else:
             final_dist = vocab_dist
+        tau = None
 
-        return final_dist, s_t, c_t, attn_dist, p_gen, coverage
+        if config.adaptive_sparsemax:
+          eps = torch.DoubleTensor([config.eps]).cuda(0)
+          activation = torch.sigmoid
+          tau = ( 1 - eps ) * activation(self.p_sparse_linear( torch.cat((c_t, s_t_hat, x), 1) ))
+          debug('tau + eps',tau + eps)
+          final_dist =  sparsemax(final_dist / (tau + eps) , dim=-1)
+        elif config.use_top_p:
+          final_dist = top_p(final_dist, config.top_p)
+        # with open('tau.txt','a') as f:
+        #   f.write(','.join([ str(i) for i in tau.cpu().detach().numpy().round(4)]) + '\n')
+        # debug("top", final_dist.topk(10, -1))
+        # debug("entropy", vocab_dist_entropy)
+
+        return final_dist, s_t, c_t, attn_dist, p_gen, coverage, tau
 
 class Model(object):
     def __init__(self, model_file_path=None, is_eval=False):

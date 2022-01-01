@@ -163,7 +163,7 @@ class SparsemaxFunction(Function):
         v_hat = grad_input.sum(dim=dim) / supp_size.to(output.dtype).squeeze(dim)
         v_hat = v_hat.unsqueeze(dim)
         grad_input = torch.where(output != 0, grad_input - v_hat, grad_input)
-        return grad_input, None, None
+        return grad_input, None, None, None
 
 
 class Entmax15Function(Function):
@@ -219,7 +219,6 @@ def sparsemax(X, dim=-1, k=None):
     P : torch tensor, same shape as X
         The projection result, such that P.sum(dim=dim) == 1 elementwise.
     """
-
     return SparsemaxFunction.apply(X, dim, k)
 
 

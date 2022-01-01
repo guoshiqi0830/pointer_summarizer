@@ -99,7 +99,7 @@ class BeamSearch(object):
 
             batch = self.batcher.next_batch()
 
-            break
+            # break
 
         print("Decoder has finished reading dataset for single_pass.")
         print("Now starting ROUGE eval...")
@@ -157,7 +157,7 @@ class BeamSearch(object):
                     all_coverage.append(h.coverage)
                 coverage_t_1 = torch.stack(all_coverage, 0)
 
-            final_dist, s_t, c_t, attn_dist, p_gen, coverage_t = self.model.decoder(y_t_1, s_t_1,
+            final_dist, s_t, c_t, attn_dist, p_gen, coverage_t, tau = self.model.decoder(y_t_1, s_t_1,
                                                         encoder_outputs, encoder_feature, enc_padding_mask, c_t_1,
                                                         extra_zeros, enc_batch_extend_vocab, coverage_t_1, steps)
             log_probs = torch.log(final_dist)
@@ -195,7 +195,7 @@ class BeamSearch(object):
 
             steps += 1
 
-            break
+            # break
 
         if len(results) == 0:
             results = beams

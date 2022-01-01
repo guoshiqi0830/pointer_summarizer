@@ -42,6 +42,7 @@ class Train(object):
 
         self.summary_writer = tf.summary.create_file_writer(train_dir)
 
+
     def save_model(self, running_avg_loss, iter):
         state = {
             'iter': iter,
@@ -61,8 +62,7 @@ class Train(object):
                  list(self.model.reduce_state.parameters())
         initial_lr = config.lr_coverage if config.is_coverage else config.lr
         self.optimizer = Adagrad(params, lr=initial_lr, initial_accumulator_value=config.adagrad_init_acc)
-        # self.optimizer = Adam(params, lr=initial_lr, betas=config.adam_betas, eps=config.adam_eps, 
-                              # weight_decay=config.adam_weight_decay)
+        # self.optimizer = Adam(params)
         start_iter, start_loss = 0, 0
 
         if model_file_path is not None:
@@ -121,11 +121,11 @@ class Train(object):
         # debug(batch.original_articles[0])
         # debug(batch.original_abstracts[0])
         loss_mask = self.get_loss_mask(enc_batch, dec_batch, batch.absts)
-        debug('loss_mask',loss_mask)
+        # debug('loss_mask',loss_mask)
         step_losses = []
         for di in range(min(max_dec_len, config.max_dec_steps)):
             y_t_1 = dec_batch[:, di]  # Teacher forcing
-            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, next_coverage = self.model.decoder(y_t_1, s_t_1,
+            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, next_coverage, tau = self.model.decoder(y_t_1, s_t_1,
                                                         encoder_outputs, encoder_feature, enc_padding_mask, c_t_1,
                                                         extra_zeros, enc_batch_extend_vocab,
                                                                            coverage, di)
@@ -133,12 +133,11 @@ class Train(object):
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + config.eps)
 
-            debug('enc_batch',enc_batch.size())
-            debug('dec_batch',dec_batch.size())
-            debug('target',target.size())
-            debug('final_dist', final_dist.size())
-            debug('gold_probs',gold_probs.size())
-            debug('step_loss',step_loss.size())
+            # debug('enc_batch',enc_batch.size())
+            # debug('dec_batch',dec_batch.size())
+            # debug('final_dist', final_dist.size())
+            # debug('target',target)
+            # debug('gold_probs',gold_probs)
 
             if config.is_coverage:
                 step_coverage_loss = torch.sum(torch.min(attn_dist, coverage), 1)
@@ -147,20 +146,24 @@ class Train(object):
                 
             step_mask = dec_padding_mask[:, di]
             step_loss = step_loss * step_mask
-            debug('step_loss_before',step_loss)
+            # debug('step_loss_before',step_loss)
+            # debug('config.loss_mask',config.loss_mask)
             if config.loss_mask:
                 step_loss = step_loss * loss_mask
-            debug('step_loss_after',step_loss)
+                # pass
+            # debug('step_loss_after',step_loss)
             step_losses.append(step_loss)
 
             if config.DEBUG:
-              break
+              # break
+              pass
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
         batch_avg_loss = sum_losses/dec_lens_var
         loss = torch.mean(batch_avg_loss)
 
-        loss.backward()
+        if not config.DEBUG:
+          loss.backward()
 
         self.norm = clip_grad_norm_(self.model.encoder.parameters(), config.max_grad_norm)
         clip_grad_norm_(self.model.decoder.parameters(), config.max_grad_norm)
@@ -168,30 +171,37 @@ class Train(object):
 
         self.optimizer.step()
 
-        return loss.item()
+        return loss.item(), tau
 
     def trainIters(self, n_iters, model_file_path=None):
         iter, running_avg_loss = self.setup_train(model_file_path)
         start = time.time()
+        
+        start_iter = iter
         while iter < n_iters:
             batch = self.batcher.next_batch()
-            loss = self.train_one_batch(batch)
+            loss, tau = self.train_one_batch(batch)
 
             running_avg_loss = calc_running_avg_loss(loss, running_avg_loss, self.summary_writer, iter)
             iter += 1
+
+            if config.DEBUG:
+              debug('iter',iter)
+              if iter - start_iter > config.BREAK_POINT:
+                break
 
             if iter % 100 == 0:
                 self.summary_writer.flush()
             print_interval = 100
             if iter % print_interval == 0:
-                print('steps %d, seconds for %d batch: %.2f , loss: %f' % (iter, print_interval,
-                                                                           time.time() - start, loss))
+                print('steps %d, seconds for %d batch: %.2f , loss: %f' % (iter, print_interval, time.time() - start, loss))
+                if config.adaptive_sparsemax:
+                  print('tau + eps', [ round(e[0],4) for e in (tau + config.eps).detach().cpu().numpy().tolist()])
                 start = time.time()
             if iter % 5000 == 0:
                 self.save_model(running_avg_loss, iter)
             
-            if config.DEBUG:
-              break
+            
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train script")

@@ -1,13 +1,14 @@
 import os
 
-root_dir = os.path.expanduser("/content/drive/MyDrive/Experiment/20201213/")
+from torch._C import ThroughputBenchmark
 
-#train_data_path = os.path.join(root_dir, "ptr_nw/cnn-dailymail-master/finished_files/train.bin")
-train_data_path = os.path.join(root_dir, "data/finished_files/chunked/train_*")
-eval_data_path = os.path.join(root_dir, "data/finished_files/val.bin")
-decode_data_path = os.path.join(root_dir, "data/finished_files/test.bin")
-# decode_data_path = os.path.join(root_dir, "data/finished_files/test_000.bin")
-vocab_path = os.path.join(root_dir, "data/finished_files/vocab")
+root_dir = os.path.expanduser("/content/drive/MyDrive/Experiment/20210816/")
+data_dir = os.path.expanduser("/content/drive/MyDrive/Experiment/20201213/")
+
+train_data_path = os.path.join(data_dir, "data/finished_files/chunked/train_*")
+eval_data_path = os.path.join(data_dir, "data/finished_files/val.bin")
+decode_data_path = os.path.join(data_dir, "data/finished_files/test.bin")
+vocab_path = os.path.join(data_dir, "data/finished_files/vocab")
 log_root = os.path.join(root_dir, "log")
 
 # Hyperparameters
@@ -38,10 +39,21 @@ use_gpu=True
 lr_coverage=0.15
 
 DEBUG=False
+BREAK_POINT=1
+REC_ENTROPY=False
 
 # Loss Mask
 loss_mask=False
-alpha=0.25
+alpha=4
 
 # Sparse Loss
 tsallis_alpha=1
+temperature=1
+
+# adaptive sparsemax
+adaptive_sparsemax = True
+fix_the_rest = False
+
+# top_p
+use_top_p = False
+top_p = 0.99
